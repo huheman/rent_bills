@@ -1,7 +1,11 @@
 import json
+import logging
 from typing import Any
 
 from app.core.config import Settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIClient:
@@ -21,6 +25,13 @@ class OpenAIClient:
             raise ValueError("prompt cannot be empty")
         if not normalized_image_url:
             raise ValueError("s3_image_url cannot be empty")
+
+        logger.info(
+            "Calling OpenAI OCR model=%s prompt=%s image_url=%s",
+            self._settings.openai_model,
+            normalized_prompt,
+            normalized_image_url,
+        )
 
         response = self._client.chat.completions.create(
             model=self._settings.openai_model,
@@ -51,6 +62,7 @@ class OpenAIClient:
         )
 
         content = response.choices[0].message.content
+        logger.info("OpenAI OCR raw response=%s", content)
         if not content:
             raise RuntimeError("OpenAI OCR response is empty")
 
