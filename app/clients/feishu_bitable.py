@@ -43,42 +43,55 @@ class FeishuBitableClient:
                 Condition.builder().field_name(FIELD_ROOM_NAME).operator("is").value([room_name]).build()
             )
 
-        request = (
-            SearchAppTableRecordRequest.builder()
-            .app_token(self._settings.feishu_table_app_token)
-            .table_id(self._settings.feishu_table_id)
-            .page_size(200)
-            .request_body(
-                SearchAppTableRecordRequestBody.builder()
-                .field_names(
-                    [
-                        FIELD_ROOM_NAME,
-                        FIELD_MONTH,
-                        FIELD_RENT,
-                        FIELD_WATER_THIS,
-                        FIELD_WATER_PREV,
-                        FIELD_ELECTRICITY_THIS,
-                        FIELD_ELECTRICITY_PREV,
-                        FIELD_WATER_PRICE,
-                        FIELD_ELECTRICITY_PRICE,
-                        FIELD_SPECIAL_WATER_PRICE,
-                        FIELD_SPECIAL_ELECTRICITY_PRICE,
-                        FIELD_CREATED_AT,
-                    ]
-                )
-                .sort([Sort.builder().field_name(FIELD_ROOM_NAME).desc(True).build()])
-                .filter(FilterInfo.builder().conjunction("and").conditions(conditions).build())
-                .automatic_fields(False)
-                .build()
+        request_body = (
+            SearchAppTableRecordRequestBody.builder()
+            .field_names(
+                [
+                    FIELD_ROOM_NAME,
+                    FIELD_MONTH,
+                    FIELD_RENT,
+                    FIELD_WATER_THIS,
+                    FIELD_WATER_PREV,
+                    FIELD_ELECTRICITY_THIS,
+                    FIELD_ELECTRICITY_PREV,
+                    FIELD_WATER_PRICE,
+                    FIELD_ELECTRICITY_PRICE,
+                    FIELD_SPECIAL_WATER_PRICE,
+                    FIELD_SPECIAL_ELECTRICITY_PRICE,
+                    FIELD_CREATED_AT,
+                ]
             )
+            .sort([Sort.builder().field_name(FIELD_ROOM_NAME).desc(True).build()])
+            .filter(FilterInfo.builder().conjunction("and").conditions(conditions).build())
+            .automatic_fields(False)
             .build()
         )
 
-        response = self._client.bitable.v1.app_table_record.search(request)
-        if not response.success():
-            self._raise_lark_error("search", response)
+        items: list[Any] = []
+        page_token: str | None = None
+        while True:
+            request_builder = (
+                SearchAppTableRecordRequest.builder()
+                .app_token(self._settings.feishu_table_app_token)
+                .table_id(self._settings.feishu_table_id)
+                .page_size(200)
+                .request_body(request_body)
+            )
+            if page_token:
+                request_builder.page_token(page_token)
 
-        return self._extract_fields(response.data.items)
+            response = self._client.bitable.v1.app_table_record.search(request_builder.build())
+            if not response.success():
+                self._raise_lark_error("search", response)
+
+            items.extend(response.data.items or [])
+            if not response.data.has_more:
+                break
+            page_token = response.data.page_token
+            if not page_token:
+                raise RuntimeError("Feishu bitable search returned has_more without page_token")
+
+        return self._extract_fields(items)
 
     def save_record_to_db(self, json_record: dict[str, Any], request_id: str) -> None:
         from lark_oapi.api.bitable.v1 import AppTableRecord, CreateAppTableRecordRequest

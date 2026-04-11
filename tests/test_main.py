@@ -1,6 +1,10 @@
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_feishu_renewal_service, get_upload_service
+from app.api.deps import (
+    get_electricity_meter_ocr_service,
+    get_feishu_renewal_service,
+    get_upload_service,
+)
 from app.core.config import Settings
 from app.main import app
 from app.schemas.feishu import RenewalResponse
@@ -47,7 +51,7 @@ def test_feishu_renew_records() -> None:
     app.dependency_overrides[get_feishu_renewal_service] = lambda: StubRenewalService()
     try:
         response = client.post(
-            "/api/feishu/renew-records",
+            "/feishu/renew-records",
             json={"target_date": "2026-04-20"},
         )
     finally:
@@ -75,7 +79,7 @@ def test_feishu_renew_records_runtime_error() -> None:
     app.dependency_overrides[get_feishu_renewal_service] = lambda: FailingRenewalService()
     try:
         response = client.post(
-            "/api/feishu/renew-records",
+            "/feishu/renew-records",
             json={"target_date": "2026-04-20"},
         )
     finally:
@@ -103,7 +107,7 @@ def test_feishu_renew_records_skips_before_20th() -> None:
     app.dependency_overrides[get_feishu_renewal_service] = lambda: SkippingRenewalService()
     try:
         response = client.post(
-            "/api/feishu/renew-records",
+            "/feishu/renew-records",
             json={"target_date": "2026-04-19"},
         )
     finally:
@@ -140,7 +144,7 @@ def test_create_presigned_upload() -> None:
     app.dependency_overrides[get_upload_service] = lambda: StubUploadService()
     try:
         response = client.post(
-            "/api/uploads/presign",
+            "/uploads/presign",
             json={"filename": "rent-bill.png", "content_type": "image/png", "month": "2026-03"},
         )
     finally:
@@ -156,6 +160,46 @@ def test_create_presigned_upload() -> None:
             "object_key": "raw/2026-03/20260410213000-abc-rent-bill.png",
             "expires_in": 600,
             "required_headers": {"Content-Type": "image/png"},
+        },
+    }
+
+
+def test_electricity_meter_ocr() -> None:
+    class StubElectricityMeterOcrService:
+        def run(self, payload):
+            assert payload.month == "2026-04"
+            assert payload.object_key == "raw/2026-04/meter.png"
+            return {
+                "status": "completed",
+                "month": "2026-04",
+                "feishu_month": "2026年4月",
+                "source_count": 2,
+                "object_key": "raw/2026-04/meter.png",
+                "result": {"201": 1460, "202": 2360},
+                "reason": None,
+            }
+
+    app.dependency_overrides[get_electricity_meter_ocr_service] = lambda: StubElectricityMeterOcrService()
+    try:
+        response = client.post(
+            "/electricity-meter/ocr",
+            json={"month": "2026-04", "object_key": "raw/2026-04/meter.png"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "status": "completed",
+            "month": "2026-04",
+            "feishu_month": "2026年4月",
+            "source_count": 2,
+            "object_key": "raw/2026-04/meter.png",
+            "result": {"201": 1460, "202": 2360},
+            "reason": None,
         },
     }
 
@@ -192,7 +236,7 @@ def test_create_presigned_upload_rejects_invalid_filename() -> None:
     app.dependency_overrides[get_upload_service] = lambda: FailingUploadService()
     try:
         response = client.post(
-            "/api/uploads/presign",
+            "/uploads/presign",
             json={"filename": "", "content_type": "image/png", "month": "2026-03"},
         )
     finally:
@@ -209,7 +253,7 @@ def test_create_presigned_upload_rejects_invalid_month() -> None:
     app.dependency_overrides[get_upload_service] = lambda: FailingUploadService()
     try:
         response = client.post(
-            "/api/uploads/presign",
+            "/uploads/presign",
             json={"filename": "rent-bill.png", "content_type": "image/png", "month": "2026-13"},
         )
     finally:

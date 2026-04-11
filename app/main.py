@@ -2,7 +2,7 @@ from fastapi import FastAPI
 
 from app.core.logging import setup_logging
 from app.core.handlers import register_exception_handlers
-from app.api.routes import feishu, upload
+from app.api.routes import electricity_meter, feishu, upload
 from app.schemas.common import ApiResponse, success_response
 
 setup_logging()
@@ -16,6 +16,7 @@ app = FastAPI(
 register_exception_handlers(app)
 app.include_router(feishu.router)
 app.include_router(upload.router)
+app.include_router(electricity_meter.router)
 
 
 @app.get("/", response_model=ApiResponse[dict[str, str]])

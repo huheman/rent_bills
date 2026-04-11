@@ -64,7 +64,7 @@ Example request:
 ```powershell
 Invoke-RestMethod `
   -Method Post `
-  -Uri "http://127.0.0.1:8000/api/feishu/renew-records" `
+  -Uri "http://127.0.0.1:8000/feishu/renew-records" `
   -ContentType "application/json" `
   -Body '{"target_date":"2026-04-20"}'
 ```
@@ -74,7 +74,7 @@ Presign upload request:
 ```powershell
 Invoke-RestMethod `
   -Method Post `
-  -Uri "http://127.0.0.1:8000/api/uploads/presign" `
+  -Uri "http://127.0.0.1:8000/uploads/presign" `
   -ContentType "application/json" `
   -Body '{"filename":"rent-bill.png","content_type":"image/png","month":"2026-03"}'
 ```

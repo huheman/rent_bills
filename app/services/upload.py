@@ -47,6 +47,31 @@ class UploadService:
             required_headers=required_headers,
         )
 
+    def create_presigned_download_url(self, object_key: str) -> str:
+        normalized_object_key = object_key.strip().lstrip("/")
+        if not normalized_object_key:
+            raise AppError("object_key cannot be empty", code=4003, status_code=400)
+
+        try:
+            import oss2
+        except ImportError as exc:
+            raise RuntimeError("Missing dependency: oss2") from exc
+
+        auth = oss2.Auth(
+            self._settings.oss_access_key_id,
+            self._settings.oss_access_key_secret,
+        )
+        bucket = oss2.Bucket(
+            auth,
+            self._normalize_endpoint(self._settings.oss_endpoint),
+            self._settings.oss_bucket_name,
+        )
+        return bucket.sign_url(
+            "GET",
+            normalized_object_key,
+            self._settings.oss_presign_expire_seconds,
+        )
+
     def _build_object_key(self, filename: str, month: str) -> str:
         safe_filename = self._sanitize_filename(filename)
         now = datetime.now()
