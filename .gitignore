@@ -1,0 +1,49 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment variables and local secrets
+.env
+.env.*
+!.env.example
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Build / packaging output
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Python tooling caches
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.tox/
+.nox/
+
+# Logs and runtime files
+logs/
+*.log
+*.pid
+
+# Local editor / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Docker overrides
+docker-compose.override.yml
