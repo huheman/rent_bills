@@ -40,7 +40,7 @@ class ElectricityMeterOcrService:
 
         image_url = self._upload_service.create_presigned_download_url(payload.object_key)
         result = self._openai_client.ocr_to_json(
-            _build_prompt(records),
+            _build_prompt(records, payload.extra_prompt),
             image_url,
         )
 
@@ -58,7 +58,7 @@ def _to_feishu_month(month: str) -> str:
     return format_month_str(datetime.strptime(month, "%Y-%m").date())
 
 
-def _build_prompt(records: list[dict[str, Any]]) -> str:
+def _build_prompt(records: list[dict[str, Any]], extra_prompt: str | None = None) -> str:
     previous_readings = []
     for record in records:
         room_name = str(record.get(FIELD_ROOM_NAME, "")).strip()
@@ -69,10 +69,14 @@ def _build_prompt(records: list[dict[str, Any]]) -> str:
         )
 
     readings_text = "\n".join(previous_readings)
-    return (
+    prompt = (
         "请从图片中识别每个房间的本月电表读数。\n\n"
         "以下是上个月各房间的电表读数，仅用于辅助判断：\n"
         f"{readings_text}\n\n"
         "请只返回 JSON 对象，key 是房号，value 是图片中读取到的本月电表读数。\n"
         "示例：{\"201\": 1460, \"202\": 2360}"
     )
+    normalized_extra_prompt = (extra_prompt or "").strip()
+    if not normalized_extra_prompt:
+        return prompt
+    return f"{prompt}\n\n补充要求：\n{normalized_extra_prompt}"

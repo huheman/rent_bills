@@ -169,6 +169,7 @@ def test_electricity_meter_ocr() -> None:
         def run(self, payload):
             assert payload.month == "2026-04"
             assert payload.object_key == "raw/2026-04/meter.png"
+            assert payload.extra_prompt == "只看电表黑色数字"
             return {
                 "status": "completed",
                 "month": "2026-04",
@@ -183,7 +184,11 @@ def test_electricity_meter_ocr() -> None:
     try:
         response = client.post(
             "/electricity-meter/ocr",
-            json={"month": "2026-04", "object_key": "raw/2026-04/meter.png"},
+            json={
+                "month": "2026-04",
+                "object_key": "raw/2026-04/meter.png",
+                "extra_prompt": "只看电表黑色数字",
+            },
         )
     finally:
         app.dependency_overrides.clear()

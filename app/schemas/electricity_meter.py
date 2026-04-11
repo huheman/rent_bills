@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class ElectricityMeterOcrRequest(BaseModel):
     month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     object_key: str = Field(min_length=1)
+    extra_prompt: str | None = None
 
 
 class ElectricityMeterOcrResponse(BaseModel):

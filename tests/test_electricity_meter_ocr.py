@@ -76,3 +76,37 @@ def test_electricity_meter_ocr_uses_previous_readings_and_presigned_url() -> Non
     assert "201: 1452" in captured["prompt"]
     assert "202: 2345" in captured["prompt"]
     assert "key 是房号" in captured["prompt"]
+
+
+def test_electricity_meter_ocr_appends_extra_prompt_when_provided() -> None:
+    captured = {}
+
+    class StubFeishuClient:
+        def search_by_month(self, month_str, room_name=None):
+            return [{FIELD_ROOM_NAME: "201", FIELD_ELECTRICITY_PREV: 1452}]
+
+    class StubUploadService:
+        def create_presigned_download_url(self, object_key):
+            return "https://oss.example.com/raw/2026-04/meter.png?signature=abc"
+
+    class StubOpenAIClient:
+        def ocr_to_json(self, prompt, s3_image_url):
+            captured["prompt"] = prompt
+            return {"201": 1460}
+
+    service = ElectricityMeterOcrService(
+        StubFeishuClient(),
+        StubUploadService(),
+        StubOpenAIClient(),
+    )
+
+    service.run(
+        ElectricityMeterOcrRequest(
+            month="2026-04",
+            object_key="raw/2026-04/meter.png",
+            extra_prompt="201 的数字容易反光，优先看右下角清晰读数。",
+        )
+    )
+
+    assert "补充要求" in captured["prompt"]
+    assert "201 的数字容易反光" in captured["prompt"]
