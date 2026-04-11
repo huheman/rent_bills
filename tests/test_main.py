@@ -1,8 +1,10 @@
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_feishu_renewal_service, get_upload_service
+from app.core.config import Settings
 from app.main import app
 from app.schemas.feishu import RenewalResponse
+from app.services.upload import UploadService
 
 
 client = TestClient(app)
@@ -126,10 +128,11 @@ def test_create_presigned_upload() -> None:
         def create_presigned_upload(self, payload):
             assert payload.filename == "rent-bill.png"
             assert payload.content_type == "image/png"
+            assert payload.month == "2026-03"
             return {
                 "method": "PUT",
                 "upload_url": "https://example.com/upload",
-                "object_key": "raw/2026-04/20260410213000-abc-rent-bill.png",
+                "object_key": "raw/2026-03/20260410213000-abc-rent-bill.png",
                 "expires_in": 600,
                 "required_headers": {"Content-Type": "image/png"},
             }
@@ -138,7 +141,7 @@ def test_create_presigned_upload() -> None:
     try:
         response = client.post(
             "/api/uploads/presign",
-            json={"filename": "rent-bill.png", "content_type": "image/png"},
+            json={"filename": "rent-bill.png", "content_type": "image/png", "month": "2026-03"},
         )
     finally:
         app.dependency_overrides.clear()
@@ -150,11 +153,35 @@ def test_create_presigned_upload() -> None:
         "data": {
             "method": "PUT",
             "upload_url": "https://example.com/upload",
-            "object_key": "raw/2026-04/20260410213000-abc-rent-bill.png",
+            "object_key": "raw/2026-03/20260410213000-abc-rent-bill.png",
             "expires_in": 600,
             "required_headers": {"Content-Type": "image/png"},
         },
     }
+
+
+def test_presigned_upload_object_key_uses_request_month() -> None:
+    settings = Settings(
+        feishu_app_id=None,
+        feishu_app_secret=None,
+        feishu_table_id=None,
+        feishu_table_app_token=None,
+        app_timezone="Asia/Shanghai",
+        oss_access_key_id=None,
+        oss_access_key_secret=None,
+        oss_endpoint=None,
+        oss_bucket_name=None,
+        oss_upload_prefix="raw/",
+        oss_presign_expire_seconds=600,
+        openai_base_url=None,
+        openai_token=None,
+        openai_model="gpt-4o-mini",
+    )
+
+    object_key = UploadService(settings)._build_object_key("folder/rent-bill.png", "2025-12")
+
+    assert object_key.startswith("raw/2025-12/")
+    assert object_key.endswith("-rent-bill.png")
 
 
 def test_create_presigned_upload_rejects_invalid_filename() -> None:
@@ -166,7 +193,24 @@ def test_create_presigned_upload_rejects_invalid_filename() -> None:
     try:
         response = client.post(
             "/api/uploads/presign",
-            json={"filename": "", "content_type": "image/png"},
+            json={"filename": "", "content_type": "image/png", "month": "2026-03"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+
+
+def test_create_presigned_upload_rejects_invalid_month() -> None:
+    class FailingUploadService:
+        def create_presigned_upload(self, payload):
+            raise RuntimeError("should not be called")
+
+    app.dependency_overrides[get_upload_service] = lambda: FailingUploadService()
+    try:
+        response = client.post(
+            "/api/uploads/presign",
+            json={"filename": "rent-bill.png", "content_type": "image/png", "month": "2026-13"},
         )
     finally:
         app.dependency_overrides.clear()

@@ -76,9 +76,10 @@ Invoke-RestMethod `
   -Method Post `
   -Uri "http://127.0.0.1:8000/api/uploads/presign" `
   -ContentType "application/json" `
-  -Body '{"filename":"rent-bill.png","content_type":"image/png"}'
+  -Body '{"filename":"rent-bill.png","content_type":"image/png","month":"2026-03"}'
 ```
 
+The `month` field must use `YYYY-MM` format and is used as the upload folder under `OSS_UPLOAD_PREFIX`, for example `raw/2026-03/...`.
 The API returns a `PUT` URL, the generated `object_key`, and the `required_headers` that the frontend must send back to OSS unchanged.
 
 Successful responses now use a unified envelope:

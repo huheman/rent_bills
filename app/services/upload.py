@@ -15,7 +15,7 @@ class UploadService:
         self._settings = settings
 
     def create_presigned_upload(self, payload: PresignUploadRequest) -> PresignUploadResponse:
-        object_key = self._build_object_key(payload.filename)
+        object_key = self._build_object_key(payload.filename, payload.month)
         required_headers = {"Content-Type": payload.content_type}
 
         try:
@@ -47,13 +47,12 @@ class UploadService:
             required_headers=required_headers,
         )
 
-    def _build_object_key(self, filename: str) -> str:
+    def _build_object_key(self, filename: str, month: str) -> str:
         safe_filename = self._sanitize_filename(filename)
         now = datetime.now()
-        date_prefix = now.strftime("%Y-%m")
         timestamp = now.strftime("%Y%m%d%H%M%S")
         prefix = self._normalize_prefix(self._settings.oss_upload_prefix)
-        return f"{prefix}{date_prefix}/{timestamp}-{uuid4().hex}-{safe_filename}"
+        return f"{prefix}{month}/{timestamp}-{uuid4().hex}-{safe_filename}"
 
     @staticmethod
     def _sanitize_filename(filename: str) -> str:
