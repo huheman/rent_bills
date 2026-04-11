@@ -6,7 +6,7 @@ from app.schemas.feishu import RenewalRequest, RenewalResponse
 from app.services.feishu_renewal import FeishuRenewalService
 
 
-router = APIRouter(prefix="/api/feishu", tags=["feishu"])
+router = APIRouter(prefix="/feishu", tags=["feishu"])
 
 
 @router.post("/renew-records", response_model=ApiResponse[RenewalResponse])

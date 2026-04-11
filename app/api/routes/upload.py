@@ -6,7 +6,7 @@ from app.schemas.upload import PresignUploadRequest, PresignUploadResponse
 from app.services.upload import UploadService
 
 
-router = APIRouter(prefix="/api/uploads", tags=["uploads"])
+router = APIRouter(prefix="/uploads", tags=["uploads"])
 
 
 @router.post("/presign", response_model=ApiResponse[PresignUploadResponse])
