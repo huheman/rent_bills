@@ -54,5 +54,6 @@ def test_openai_client_ocr_to_json(monkeypatch) -> None:
     assert captured["model"] == "gpt-4o-mini"
     assert captured["response_format"] == {"type": "json_object"}
     assert captured["messages"][1]["content"][1]["image_url"] == {
-        "url": "https://bucket.s3.amazonaws.com/rent.png"
+        "url": "https://bucket.s3.amazonaws.com/rent.png",
+        "detail": "high",
     }

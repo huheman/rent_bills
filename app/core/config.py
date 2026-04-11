@@ -45,7 +45,7 @@ class Settings:
             oss_presign_expire_seconds=_read_int_env("OSS_PRESIGN_EXPIRE_SECONDS", 600),
             openai_base_url=os.getenv("OPENAI_BASE_URL"),
             openai_token=os.getenv("OPENAI_TOKEN"),
-            openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1"),
         )
 
     def require_feishu(self) -> None:

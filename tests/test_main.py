@@ -167,16 +167,11 @@ def test_create_presigned_upload() -> None:
 def test_electricity_meter_ocr() -> None:
     class StubElectricityMeterOcrService:
         def run(self, payload):
-            assert payload.month == "2026-04"
             assert payload.object_key == "raw/2026-04/meter.png"
-            assert payload.extra_prompt == "只看电表黑色数字"
             return {
                 "status": "completed",
-                "month": "2026-04",
-                "feishu_month": "2026年4月",
-                "source_count": 2,
                 "object_key": "raw/2026-04/meter.png",
-                "result": {"201": 1460, "202": 2360},
+                "result": {"right_1": [1460, 2360]},
                 "reason": None,
             }
 
@@ -185,9 +180,7 @@ def test_electricity_meter_ocr() -> None:
         response = client.post(
             "/electricity-meter/ocr",
             json={
-                "month": "2026-04",
                 "object_key": "raw/2026-04/meter.png",
-                "extra_prompt": "只看电表黑色数字",
             },
         )
     finally:
@@ -199,11 +192,8 @@ def test_electricity_meter_ocr() -> None:
         "message": "success",
         "data": {
             "status": "completed",
-            "month": "2026-04",
-            "feishu_month": "2026年4月",
-            "source_count": 2,
             "object_key": "raw/2026-04/meter.png",
-            "result": {"201": 1460, "202": 2360},
+            "result": {"right_1": [1460, 2360]},
             "reason": None,
         },
     }

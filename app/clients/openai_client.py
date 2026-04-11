@@ -54,7 +54,10 @@ class OpenAIClient:
                         },
                         {
                             "type": "image_url",
-                            "image_url": {"url": normalized_image_url},
+                            "image_url": {
+                                "url": normalized_image_url,
+                                "detail": "high",
+                            },
                         },
                     ],
                 },

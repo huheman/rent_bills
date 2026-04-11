@@ -34,8 +34,7 @@ def get_openai_client(settings: Settings = Depends(get_settings)) -> OpenAIClien
 
 
 def get_electricity_meter_ocr_service(
-    feishu_client: FeishuBitableClient = Depends(get_feishu_bitable_client),
     upload_service: UploadService = Depends(get_upload_service),
     openai_client: OpenAIClient = Depends(get_openai_client),
 ) -> ElectricityMeterOcrService:
-    return ElectricityMeterOcrService(feishu_client, upload_service, openai_client)
+    return ElectricityMeterOcrService(upload_service, openai_client)
