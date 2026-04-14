@@ -1,0 +1,250 @@
+这种场景，本质上是一个跨多个外部系统的长事务编排问题，而且你又加了一个很强的约束：
+每个 post 只能请求一次，不能靠重试兜底。
+这意味着你不能用“失败了再补一遍”这种常见思路，系统设计必须围绕这几个原则展开：
+先保证不会发错
+发出后一定能确认结果
+不能确认时，宁可挂起人工处理，也不能盲发第二次
+RDS 状态只能反映“确定事实”，不能反映“猜测”
+所以这里不适合简单说“用分布式事务”或者“加个消息队列就行”，真正可行的设计更接近：
+一、整体模式：Saga + 持久化状态机 + 幂等键 + Outbox
+你这个流程建议设计成一个单一编排器 Orchestrator 驱动的 Saga，而不是各服务互相回调乱串。
+流程大致是：
+RDS(待处理) -> get CEP -> post AEP -> 并发 post CEP1/2/3 -> post CNS -> 更新 RDS 最终状态
+但关键点不在顺序，而在于：
+1）把“业务状态”和“调用事实”拆开
+RDS 里不要只存一个最终状态，而要存一整套步骤状态，例如：
+enroll_status: INIT / PROCESSING / SUCCESS / FAILED / UNKNOWN / MANUAL_REVIEW
+aep_status: NOT_SENT / SENT / SUCCEEDED / FAILED / UNKNOWN
+cep1_status
+cep2_status
+cep3_status
+cns_status
+current_step
+workflow_version
+request_id / correlation_id
+external_idempotency_key
+last_error_code
+decision_frozen（是否已进入不可重复发送区）
+这样 RDS 不是简单“结果表”，而是事实账本。
+二、最核心原则：先落库，再出站
+因为每个 post 只能发一次，所以绝不能出现“请求已经发出，但本地数据库没记下来”。
+否则系统崩溃后，你都不知道这个请求到底发没发过，就进入不可判定状态。
+所以必须采用：
+Outbox Pattern（出站消息表）
+例如：
+主业务表 enrollment_workflow
+记录业务状态。
+出站表 enrollment_outbox
+记录下一步要发出的请求意图，字段类似：
+event_id
+workflow_id
+step_name（POST_AEP / POST_CEP1 / ...）
+target_system
+payload
+idempotency_key
+status（NEW / DISPATCHING / SENT / ACKED / UNKNOWN / FAILED）
+created_at
+执行逻辑是：
+事务内：
+更新 workflow 状态为“准备执行 AEP”
+插入一条 outbox：POST_AEP
+commit
+事务外：
+由 dispatcher 扫描 outbox，真正发请求。
+这样保证： 只要业务认为该发，就一定有一条持久化记录。
+三、只能请求一次时，必须给每个外部调用一个“可追踪唯一键”
+既然不能重试，那你要最大化避免“发了但不知道结果”。
+所以每个外部 post 都必须带：
+requestId
+correlationId
+businessKey
+idempotencyKey（如果对方支持）
+比如：
+AEP 请求携带 workflowId + step=AEP
+CEP1 请求携带 workflowId + step=CEP1
+CEP2 请求携带 workflowId + step=CEP2
+CEP3 请求携带 workflowId + step=CEP3
+CNS 请求携带 workflowId + step=CNS
+即使对方明确说“只能请求一次”，你也仍然应该带这个键。原因不是为了让你重试，而是为了：
+对方侧日志可查
+你方人工排查可定位
+若对方实际上支持去重，你就赚到了
+四、发起请求时，状态机要进入“不可重发区”
+比如你准备发 AEP 时，建议状态转移这样做：
+发前事务：
+检查当前状态必须是 AEP_NOT_SENT
+更新为 AEP_DISPATCHING
+写 outbox
+commit
+dispatcher 发送前：
+抢占 outbox，改成 DISPATCHING
+真正调用外部接口
+收到明确成功响应：
+aep_status = SUCCEEDED
+收到明确业务失败响应：
+aep_status = FAILED
+工作流终止
+调用中断，结果未知（超时 / 网络断 / 连接 reset）
+aep_status = UNKNOWN
+enroll_status = MANUAL_REVIEW
+禁止自动再次发送
+这点非常关键。
+因为你要求“只能请求一次”，所以凡是不能证明没发出去的情况，都必须进入 UNKNOWN，不能自动补发。
+五、并发 post 3 个 CEP：不要真“裸并发”，要用 barrier 聚合
+你说的是：
+post AEP
+并发 post 3 个不同的 CEP
+最后 post CNS
+这里建议设计成：
+1）AEP 成功后，一次性创建 3 个子任务
+比如子表 enrollment_step_instance：
+workflow_id
+step_name: CEP1 / CEP2 / CEP3
+status: NOT_SENT / DISPATCHING / SUCCEEDED / FAILED / UNKNOWN
+AEP 成功后，在一个事务里：
+workflow 状态改为 CEP_FANOUT
+插入 CEP1/2/3 三条 step 记录
+插入 3 条 outbox 记录
+2）3 个 CEP 独立执行
+每个 CEP 各自维护自己的状态。
+3）用聚合器判断是否允许进入 CNS
+只有满足：
+CEP1 = SUCCEEDED
+CEP2 = SUCCEEDED
+CEP3 = SUCCEEDED
+才允许创建 POST_CNS 的 outbox。
+如果出现：
+任意一个 FAILED -> 整体 FAILED
+任意一个 UNKNOWN -> 整体 MANUAL_REVIEW / UNKNOWN
+有的成功有的处理中 -> 继续等待
+也就是说 CNS 是一个barrier step，只有前三个都确定成功才放行。
+六、不能靠补偿撤销，就要把“外部调用顺序”设计成单向收敛
+你这个链路里如果外部系统不支持 cancel / rollback，那么就不要幻想传统意义的强一致分布式事务。
+正确思路是：
+把步骤按“副作用不可逆程度”排序
+应该优先做：
+可校验、可预检查、无副作用的查询
+较轻、可幂等、可审计的创建
+最终确认类动作
+本地状态落最终态
+你的顺序本身就基本符合这个思路：
+先 get CEP
+再 AEP
+再 CEP1/2/3
+再 CNS
+最后更新 RDS
+这意味着：
+RDS 最终状态必须最后写。
+因为 RDS 是你的事实源之一，不能比外部世界更“乐观”。
+七、真正的一致性定义要改成“外部事实一致”，不是“所有系统瞬时一致”
+这种场景没法做到传统 ACID 那种全局原子提交。你真正能做到的是：
+可恢复的一致性
+即任意时刻都满足：
+本地数据库知道每一步有没有发过
+知道哪些成功、哪些失败、哪些未知
+不会重复发送
+最终状态只在所有前置步骤明确成功后才推进
+未知状态进入人工处理，不自动猜测
+这已经是这类系统里最强的、现实可落地的一致性方案了。
+八、推荐的状态设计
+可以把整个 workflow 设计成下面这些主状态：
+INIT
+PREVALIDATED
+AEP_IN_PROGRESS
+AEP_SUCCESS
+CEP_IN_PROGRESS
+CEP_PARTIAL_SUCCESS
+CNS_IN_PROGRESS
+SUCCESS
+FAILED
+UNKNOWN
+MANUAL_REVIEW
+每个子步骤也有自己的状态：
+NOT_SENT
+DISPATCHING
+SUCCEEDED
+FAILED
+UNKNOWN
+其中最重要的是 UNKNOWN。
+很多系统设计失败，就是把“未知”硬塞成“失败”。
+但在你这个约束下，未知 != 失败，因为失败时你可能还能安全停止，未知时你反而最危险，因为不能再发第二次。
+九、关于“只能请求一次”的真正工程含义
+这句话要拆开理解：
+情况 A：业务上只能处理一次，但接口支持幂等键
+那很好，直接用幂等键。你仍可安全重试。
+情况 B：接口方明确不支持重试，也不给查询接口
+这是最危险的。那你必须要求至少具备下面之一：
+请求唯一号查询接口
+回调通知
+对账接口
+服务端幂等支持
+如果这几个都没有，那么系统不可能做到完全自动闭环一致，只能做到：
+“单次发送 + 未知挂起 + 人工核查”
+这是客观限制，不是技术能力不足。
+十、建议补一个“结果确认/对账”能力
+如果我是来设计这个系统，我会强烈要求外部系统至少提供一个：
+Query API
+按 requestId / businessKey 查处理结果
+或者：
+异步回调
+post 后异步通知最终结果
+有了这个，你就能把 UNKNOWN 最终收敛掉，而不是永远人工处理。
+例如：
+post AEP 后超时，状态先置 UNKNOWN
+后台定时用 query API 查 requestId
+查到成功 -> 更新为 SUCCEEDED
+查到失败 -> 更新为 FAILED
+注意这不叫“重试 post”，只是“查询结果”，不违反“只能请求一次”。
+这个能力非常重要，几乎决定系统能否真正闭环。
+十一、数据库事务边界怎么划
+建议每一步都遵循这个边界：
+本地事务只做两件事
+校验前置状态
+更新状态 + 写 outbox
+外部调用绝不放在数据库事务内
+否则会导致：
+长事务
+锁持有过久
+调用成功但本地事务回滚，造成灾难性不一致
+所以一定是：
+事务内记录意图，事务外执行副作用。
+十二、如果让我给一个结论版方案
+我会这样设计：
+1. 单 workflow 主表
+记录整条 enrollment 的总状态、版本号、业务键、相关外部 requestId。
+2. 子步骤表
+记录 AEP、CEP1、CEP2、CEP3、CNS 各步骤状态。
+3. Outbox 表
+所有外部调用都先写 outbox，再由 dispatcher 发送。
+4. Dispatcher
+严格串行/受控并发地消费 outbox，确保同一步只会发送一次。
+5. Barrier 聚合器
+三个 CEP 全部成功才允许产生 CNS outbox。
+6. UNKNOWN 状态
+凡是“是否已成功发送无法确认”的，都进入 UNKNOWN，绝不自动补发。
+7. 人工处理 / 对账机制
+提供查询页，按 workflowId 查看每一步：
+payload
+requestId
+发送时间
+响应报文
+外部流水号
+当前状态
+8. 最终一致性规则
+只有在：
+AEP success
+CEP1/2/3 success
+CNS success
+后，才能把 RDS 主状态更新为 SUCCESS。
+否则：
+有明确失败 -> FAILED
+有未知 -> MANUAL_REVIEW/UNKNOWN
+十三、最重要的一句话
+在“每个 post 只能请求一次”的前提下，系统设计目标不是保证每一步永远成功，而是保证：
+不会重复发、不会误判成功、不会丢失调用事实、不会在未知状态下继续推进后续步骤。
+这才是你这里的一致性核心。
+如果你愿意，我下一条可以直接给你画一个更贴近代码实现的方案，包括：
+表结构设计
+状态机枚举
+dispatcher 伪代码
+3 个 CEP 并发后的 barrier 聚合伪代码
